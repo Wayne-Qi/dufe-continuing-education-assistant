@@ -13,29 +13,19 @@
 
 ## 📥 安装方法
 
-1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展
-2. 点击 [这里](https://raw.githubusercontent.com/Wayne-Qi/dufe-continuing-education-assistant/main/dufe-education-assistant.user.js) 安装脚本
-3. 访问东北财经大学继续教育平台，脚本自动生效
+1. 脚本猫 https://scriptcat.org/zh-CN/script-show-page/6844
+2. https://greasyfork.org/zh-CN/scripts/584279-%E4%B8%9C%E5%8C%97%E8%B4%A2%E7%BB%8F%E5%A4%A7%E5%AD%A6%E7%BB%A7%E7%BB%AD%E6%95%99%E8%82%B2%E5%9C%A8%E7%BA%BF%E5%AD%A6%E4%B9%A0
 
 ## 🚀 使用说明
 
-1. 登录东北财经大学继续教育平台
-2. 进入「课程学习」页面
-3. 脚本会自动识别并进入未完成的课程
-4. 视频自动播放，完成后自动返回列表
+1. https://kjw.hlj.gov.cn/jxjy/jxjycx
+2. 选择东北财经大学继续教育平台
+3. 进入「课程学习」页面
+4. 脚本会自动识别并进入未完成的课程
+5. 视频自动播放，完成后自动返回列表
 
-### 控制面板
-- **拖动标题**：移动面板位置
-- **右侧拖拽**：调整面板宽度
-- **底部拖拽**：调整日志高度
-- **点击 `−`**：折叠/展开面板
 
-## ⚙️ Tampermonkey 菜单
 
-- `🔍 扫描未完成课程`：手动触发扫描
-- `🔙 返回列表页`：手动返回课程列表
-- `🔄 重新启用`：重新激活脚本
-- `⏯️ 切换启用`：暂停/恢复脚本
 
 ## 📄 许可证
 
