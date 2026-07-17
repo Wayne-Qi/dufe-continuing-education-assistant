@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         东北财经大学继续教育在线学习
 // @namespace    http://tampermonkey.net/
-// @version      0.1.4
+// @version      0.1.4.1
 // @description  课程自动播放助手 - 全自动循环学习
 // @author       Qi
 // @match        *://trahljkj.edufe.cn/*
@@ -592,7 +592,7 @@
         if (pct >= 100) {
             setStatus(statusEl, 'stopped', '✅ 已完成');
         } else if (paused) {
-            setStatus(statusEl, 'paused', '⏸ 暂停中');
+            setStatus(statusEl, 'paused', '▶ 继续播放');
         } else {
             setStatus(statusEl, 'playing', '▶ 播放中');
         }
@@ -622,6 +622,123 @@
         dash.chapterCompleted = completed;
         dash.chapterTotal = total;
         dash.chapterTitle = title;
+    }
+
+
+    // =============== 章节列表解析 ===============
+    function parseChapterList() {
+        var result = [];
+
+        // 方法1：找所有文本以"数字."开头且较短的 div 作为候选
+        var candidates = [];
+        var divs = document.querySelectorAll('div, li');
+        for (var i = 0; i < divs.length; i++) {
+            var el = divs[i];
+            var txt = el.textContent.trim().replace(/\s+/g, ' ');
+            // 文本以数字开头，总长度适中，子元素不多（避免大容器）
+            if (/^\d+[.\s、][^\n]{2,80}$/.test(txt) && el.children.length <= 4) {
+                candidates.push(el);
+            }
+        }
+
+        // 方法2：找这些候选元素的共同父容器
+        var bestParent = null;
+        if (candidates.length >= 2) {
+            var parentMap = {};
+            var bestCount = 0;
+            for (var i = 0; i < candidates.length; i++) {
+                var p = candidates[i].parentElement;
+                while (p && p !== document.body) {
+                    var key = p.tagName + '|' + (p.className || '');
+                    if (!parentMap[key]) parentMap[key] = { el: p, count: 0, hasStatus: false };
+                    parentMap[key].count++;
+                    var pt = p.textContent;
+                    if (pt.indexOf('正在学') !== -1 || pt.indexOf('已完成') !== -1 || pt.indexOf('已学') !== -1) {
+                        parentMap[key].hasStatus = true;
+                    }
+                    p = p.parentElement;
+                }
+            }
+            // 优先选包含状态文字且候选最多的容器
+            for (var key in parentMap) {
+                var info = parentMap[key];
+                if (info.hasStatus && info.count >= 2) {
+                    bestParent = info.el;
+                    break;
+                }
+            }
+            if (!bestParent) {
+                for (var key2 in parentMap) {
+                    var info2 = parentMap[key2];
+                    if (info2.count > bestCount && info2.count >= 2) {
+                        bestCount = info2.count;
+                        bestParent = info2.el;
+                    }
+                }
+            }
+        }
+
+        // 方法3：如果上面没找到，尝试从"章节"标题容器找
+        var targetContainer = bestParent;
+        if (!targetContainer) {
+            var allEls = document.querySelectorAll('div, span, h1, h2, h3, h4, section');
+            for (var h = 0; h < allEls.length; h++) {
+                var t = allEls[h].textContent.trim();
+                if (t === '章节' || t === '章节目录' || t === '目录') {
+                    targetContainer = allEls[h].parentElement;
+                    if (targetContainer) break;
+                }
+            }
+        }
+
+        if (!targetContainer) return result;
+
+        // 从目标容器中读取列表项
+        var items = targetContainer.querySelectorAll('li, div');
+        for (var j = 0; j < items.length; j++) {
+            var item = items[j];
+            if (item.tagName === 'SCRIPT' || item.tagName === 'STYLE') continue;
+            var text = item.textContent.trim().replace(/\s+/g, ' ');
+            var m = text.match(/^(\d+)[.\s、]+(.+?)$/);
+            if (!m) continue;
+
+            var num = m[1];
+            var title = m[2].replace(/(已完成|已学|正在学|正在播放|未开始|未学习|待学习)/g, '').trim();
+            if (!title || title.length > 100) continue;
+
+            // 避免读取到页面大标题（通常不含编号）
+            if (/企业会计准则专题|培训|课程|东财|主讲教师/.test(title)) continue;
+
+            var cls = item.className || '';
+            var isCompleted = text.indexOf('已完成') !== -1 ||
+                              text.indexOf('已学') !== -1 ||
+                              /completed|done|finish|checked/i.test(cls);
+            var isCurrent = text.indexOf('正在学') !== -1 ||
+                            text.indexOf('正在播放') !== -1 ||
+                            /active|current|playing|selected/i.test(cls) ||
+                            item.getAttribute('aria-selected') === 'true' ||
+                            !!item.querySelector('svg path[fill="#f5222d"], svg path[fill="#ef4444"], svg path[fill="#ff4d4f"], svg path[fill="#faad14"]');
+
+            result.push({
+                index: parseInt(num),
+                title: title,
+                completed: isCompleted,
+                current: isCurrent,
+                element: item
+            });
+        }
+
+        // 去重并按序号排序
+        var seen = {};
+        var unique = [];
+        for (var k = 0; k < result.length; k++) {
+            var key = result[k].index + ':' + result[k].title;
+            if (!seen[key]) {
+                seen[key] = true;
+                unique.push(result[k]);
+            }
+        }
+        return unique.sort(function(a, b) { return a.index - b.index; });
     }
 
     // =============== 页面类型识别 ===============
@@ -952,6 +1069,7 @@
         var totalPlayTime  = 0;
         var lastDashUpdate = 0;
         var hasMuted       = false;
+        var hasPausedOnce  = false; // 暂停后再次播放时，日志显示“继续播放”
         var lastProgressLogTime = 0; // 上次输出进度日志的时间
 
         var control = {
@@ -1035,7 +1153,10 @@
                         video.muted = true;
                         hasMuted = true;
                     }
-                    dashLog('▶️', '视频开始播放');
+                    if (hasPausedOnce) {
+                        dashLog('▶️', '继续播放');
+                        hasPausedOnce = false;
+                    }
                     userInteracted = true;
                     updateProgress(video.currentTime, video.duration, false);
                 };
@@ -1046,6 +1167,7 @@
                     if (video.ended) return;
                     if (playStartTime) { totalPlayTime += (Date.now() - playStartTime) / 1000; playStartTime = null; }
                     dashLog('⏸', '视频暂停 (' + formatDuration(video.currentTime) + ' / ' + formatDuration(video.duration) + ')');
+                    hasPausedOnce = true;
                     updateProgress(video.currentTime, video.duration, true);
                 };
 
@@ -1055,7 +1177,42 @@
                     if (playStartTime) { totalPlayTime += (Date.now() - playStartTime) / 1000; playStartTime = null; }
                     updateProgress(video.duration, video.duration, false);
                     dash.endedCount++;
-                    dashLog('🏁', '第' + dash.endedCount + '个章节播放完毕 | 时长 ' + formatDuration(totalPlayTime));
+
+                    var chapterList = parseChapterList();
+                    var currentChapter = null;
+                    var nextChapter = null;
+                    for (var ci = 0; ci < chapterList.length; ci++) {
+                        if (chapterList[ci].current) {
+                            currentChapter = chapterList[ci];
+                            for (var ni = ci + 1; ni < chapterList.length; ni++) {
+                                if (!chapterList[ni].completed) {
+                                    nextChapter = chapterList[ni];
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    if (!currentChapter && chapterList.length > 0) {
+                        for (var li = chapterList.length - 1; li >= 0; li--) {
+                            if (chapterList[li].completed) {
+                                currentChapter = chapterList[li];
+                                if (li + 1 < chapterList.length) {
+                                    nextChapter = chapterList[li + 1];
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    var currentName = currentChapter ? (currentChapter.index + '。' + currentChapter.title) : (dash.chapterTitle && dash.chapterTitle.indexOf('。') !== -1 ? dash.chapterTitle : '当前章节');
+                    dashLog('🏁', '播放完成：' + (currentName || '当前章节'));
+                    if (nextChapter) {
+                        dashLog('🎯', '即将播放：' + nextChapter.index + '。' + nextChapter.title);
+                    } else if (dash.chapterTotal > 0 && dash.endedCount >= dash.chapterTotal) {
+                        dashLog('✅', '所有章节已播放完成');
+                    }
+
                     totalPlayTime = 0;
                     if (dash.chapterTotal === 0) {
                         updateChapterInfo(dash.endedCount, 0, dash.chapterTitle);
@@ -1123,12 +1280,12 @@
                         // dashLog('🚀', '尝试自动启动播放');  // 不显示自动启动日志
                         control.simulateUserGesture();
                         video.play().then(function () {
-                            dashLog('▶️', '已自动启动播放');
+                            // 自动开始播放不再写入日志，避免事件日志刷屏
                         }).catch(function () {
                             dashLog('⚠️', '自动启动播放失败，请手动点击播放按钮');
                         });
                     } else if (!destroyed && enabled && !video.paused && !video.ended) {
-                        dashLog('▶️', '视频已在播放');
+                        // 已在播放状态不再写入日志
                     }
                 }, CONFIG.initDelay);
 
@@ -1143,7 +1300,6 @@
                             video.muted = true;
                             hasMuted = true;
                         }
-                        dashLog('▶️', '视频开始播放');
                         updateProgress(video.currentTime, video.duration, false);
                     }
                 }, CONFIG.playStateCheckDelay);
